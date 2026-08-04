@@ -1,0 +1,56 @@
+name: Deploy EdgeEver (Fork)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: edgeever-fork-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_EMAIL: "${{ secrets.CLOUDFLARE_EMAIL }}"
+      CLOUDFLARE_API_KEY: "${{ secrets.CLOUDFLARE_API_KEY }}"
+      CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CF_ACCOUNT_ID }}"
+      EDGE_EVER_D1_DATABASE_ID: e6962900-7c67-491c-a6cc-c4d667e291c8
+      EDGE_EVER_D1_DATABASE_NAME: edgeever
+      EDGE_EVER_R2_BUCKET_NAME: edgeever-resources
+      EDGE_EVER_R2_PREVIEW_BUCKET_NAME: edgeever-resources-preview
+      EDGE_EVER_AUTH_USERNAME: "${{ secrets.EDGE_EVER_AUTH_USERNAME }}"
+      EDGE_EVER_AUTH_PASSWORD: "${{ secrets.EDGE_EVER_AUTH_PASSWORD }}"
+      EDGE_EVER_SESSION_TTL_DAYS: "400"
+      EDGE_EVER_WORKER_NAME: edgeever
+      EDGE_EVER_DEPLOYMENT_TRIGGER: github_actions_push
+      EDGE_EVER_DEPLOYMENT_METHOD: github_actions
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Deploy to Cloudflare Workers
+        env:
+          CLOUDFLARE_EMAIL: "${{ secrets.CLOUDFLARE_EMAIL }}"
+          CLOUDFLARE_API_KEY: "${{ secrets.CLOUDFLARE_API_KEY }}"
+          CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CF_ACCOUNT_ID }}"
+        run: bun run deploy:cloudflare-builds
