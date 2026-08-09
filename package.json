@@ -1,6 +1,6 @@
 {
   "name": "edgeever",
-  "version": "1.12.5",
+  "version": "1.13.3",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -34,6 +34,8 @@
     "lint:extension:firefox": "bun run --cwd apps/extension lint:firefox",
     "package:extension:firefox": "bun run --cwd apps/extension package:firefox",
     "test:extension": "bun run --cwd apps/extension test",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium",
     "dev:extension": "vite --config apps/extension/vite.config.ts",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "build:desktop:sidecar": "cargo build --manifest-path crates/desktop-sidecar/Cargo.toml --release",
@@ -52,6 +54,7 @@
     "preview:site": "bun --cwd apps/site preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:mobile": "bun run --cwd apps/mobile typecheck",
+    "typecheck:ios-editor": "bun run --cwd apps/ios/EditorSource typecheck",
     "test:restore-deleted-notebook": "bun scripts/test-restore-deleted-notebook.mjs",
     "test:mcp": "bun scripts/test-mcp.mjs",
     "db:migrate:local": "EDGE_EVER_INSTANCE= bun scripts/run-wrangler.mjs d1 migrations apply DB --local",
@@ -142,6 +145,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
     "@electron/asar": "3.4.1",
+    "@playwright/test": "^1.62.1",
     "@types/marked": "^6.0.0",
     "@types/node": "latest",
     "@types/react": "latest",
