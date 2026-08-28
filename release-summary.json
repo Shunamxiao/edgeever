@@ -1,0 +1,13 @@
+{
+  "version": "1.44.0",
+  "changes": {
+    "en-US": [
+      "Display attached files as consistent compact cards with recognizable type icons; PDF cards now toggle preview on click and load reliably in the desktop app.",
+      "Keep image uploads visually stable in the editor and clear image selection predictably when clicking the canvas."
+    ],
+    "zh-CN": [
+      "将附件统一显示为紧凑文件卡片并提供清晰的类型图标；PDF 卡片现在可单击切换预览，并在桌面端稳定加载。",
+      "图片上传时在编辑器中保持稳定的视觉占位，并在单击画布时可靠清除图片选中状态。"
+    ]
+  }
+}
