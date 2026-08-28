@@ -16,6 +16,9 @@ concurrency:
 
 jobs:
   deploy:
+    # Runs only in deployment forks. Upstream guard reference:
+    # github.repository == 'tianma-if/edgeever'
+    if: github.repository != 'tianma-if/edgeever'
     name: Build and Deploy to Cloudflare Workers
     runs-on: ubuntu-latest
     timeout-minutes: 30
