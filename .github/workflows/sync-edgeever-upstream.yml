@@ -31,7 +31,7 @@ jobs:
     if: github.repository != 'tianma-if/edgeever'
     name: Sync Fork and trigger deployment
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 55
     env:
       GH_TOKEN: ${{ secrets.SYNC_PAT }}
       UPSTREAM_REPOSITORY: tianma-if/edgeever
@@ -300,24 +300,51 @@ jobs:
           echo "mode=${ALIGN_MODE}_commit" >> "${GITHUB_OUTPUT}"
           echo "Published ${ALIGN_MODE} update for ${TARGET_REF} without changing downstream workflows."
 
-      - name: Request Cloudflare deployment
+      - name: Dispatch EdgeEver deployment
         id: deploy
         if: steps.publish.outcome == 'success'
-        env:
-          DEPLOY_HOOK_URL: ${{ secrets.EDGE_EVER_CLOUDFLARE_DEPLOY_HOOK_URL }}
         run: |
           set -euo pipefail
-          if [ -z "${DEPLOY_HOOK_URL:-}" ]; then
-            echo "No EDGE_EVER_CLOUDFLARE_DEPLOY_HOOK_URL secret — relying on Cloudflare Git integration for main pushes."
-            echo "Optional: add a Workers/Pages Deploy Hook secret if pushes do not start builds." >> "${GITHUB_STEP_SUMMARY}"
-            echo "method=git_push" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          curl -fsS -X POST "${DEPLOY_HOOK_URL}" >/dev/null
-          echo "Triggered Cloudflare Deploy Hook."
-          echo "method=git_push_and_deploy_hook" >> "${GITHUB_OUTPUT}"
+          # Pushes made with SYNC_PAT do not emit push events for this
+          # repository, so deploy-fork.yml is dispatched explicitly rather
+          # than relying on its on:push trigger. A dispatch failure is fatal
+          # on purpose: exiting 0 here is what let the live site drift 47
+          # versions behind while every sync run stayed green.
+          gh workflow run deploy-fork.yml --ref main
+          echo "Dispatched deploy-fork.yml on main."
+          echo "method=workflow_dispatch" >> "${GITHUB_OUTPUT}"
           echo "" >> "${GITHUB_STEP_SUMMARY}"
-          echo "Triggered optional Cloudflare Deploy Hook after publish." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Dispatched deploy-fork.yml via workflow_dispatch." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Await deployment result
+        id: await
+        if: steps.deploy.outcome == 'success'
+        run: |
+          set -euo pipefail
+          # Scope to the commit just published so a stale run is never read.
+          final_commit="$(git rev-parse HEAD)"
+          deadline=$(( $(date +%s) + 1800 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            run_json=$(gh run list --workflow deploy-fork.yml --commit "$final_commit" \
+              --limit 1 --json databaseId,status,conclusion)
+            run_id=$(printf '%s' "$run_json" | jq -r '.[0].databaseId // empty')
+            status=$(printf '%s' "$run_json" | jq -r '.[0].status // "pending"')
+            conclusion=$(printf '%s' "$run_json" | jq -r '.[0].conclusion // "in_progress"')
+            echo "deploy-fork.yml run=${run_id:-none} status=${status} conclusion=${conclusion}"
+            if [ "$status" = "completed" ]; then
+              echo "conclusion=${conclusion}" >> "${GITHUB_OUTPUT}"
+              if [ "$conclusion" = "success" ]; then
+                echo "Deployment run ${run_id} succeeded."
+                exit 0
+              fi
+              echo "::error::Deployment run ${run_id} concluded with ${conclusion}."
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "conclusion=timeout" >> "${GITHUB_OUTPUT}"
+          echo "::error::Deployment did not complete within 30 minutes."
+          exit 1
 
       - name: Report result / 输出结果
         if: always() && steps.upstream.outcome == 'success'
@@ -333,6 +360,8 @@ jobs:
           PUBLISH_MODE: ${{ steps.publish.outputs.mode }}
           DEPLOY_TRIGGER_OUTCOME: ${{ steps.deploy.outcome }}
           DEPLOY_TRIGGER_METHOD: ${{ steps.deploy.outputs.method }}
+          DEPLOY_AWAIT_OUTCOME: ${{ steps.await.outcome }}
+          DEPLOY_AWAIT_CONCLUSION: ${{ steps.await.outputs.conclusion || 'unknown' }}
         run: |
           set -euo pipefail
           final_commit="$(git rev-parse HEAD)"
@@ -364,16 +393,29 @@ jobs:
               esac
 
               if [ "${DEPLOY_TRIGGER_OUTCOME}" = "success" ]; then
-                case "${DEPLOY_TRIGGER_METHOD}" in
-                  git_push_and_deploy_hook)
-                    deploy_result="Requested by Git push and Deploy Hook / 已通过 Git push 和 Deploy Hook 请求"
+                deploy_result="Dispatched deploy-fork.yml / 已调度 deploy-fork.yml"
+                case "${DEPLOY_AWAIT_CONCLUSION}" in
+                  success)
+                    live_result="Deployed; run concluded successfully / 已部署，运行成功"
+                    live_status="deployed"
+                    notice_title="Deployed / 已部署"
+                    notice_body="Fork main is ${final_commit:0:12} (v${TARGET_VERSION}); the deployment run completed successfully."
+                    ;;
+                  timeout)
+                    live_result="Not confirmed (timeout) / 未确认（超时）"
+                    live_status="unknown"
+                    notice_level="error"
+                    notice_title="Deployment timeout / 部署超时"
+                    notice_body="Fork main is ${final_commit:0:12} (v${TARGET_VERSION}); the deployment run did not finish within the wait window."
                     ;;
                   *)
-                    deploy_result="Requested by Git push / 已通过 Git push 请求"
+                    live_result="Not deployed / 未部署"
+                    live_status="failed"
+                    notice_level="error"
+                    notice_title="Deployment failed / 部署失败"
+                    notice_body="Fork main is ${final_commit:0:12} (v${TARGET_VERSION}); the deployment run concluded with ${DEPLOY_AWAIT_CONCLUSION}."
                     ;;
                 esac
-                notice_title="Deployment requested / 已请求部署"
-                notice_body="Fork main is ${final_commit:0:12} (v${TARGET_VERSION}). Confirm Cloudflare Deployments builds this commit; the live version is not verified here."
               else
                 deploy_result="Trigger failed (\`${DEPLOY_TRIGGER_OUTCOME}\`) / 触发失败"
                 notice_level="error"
