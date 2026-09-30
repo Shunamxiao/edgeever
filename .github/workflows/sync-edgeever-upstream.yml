@@ -34,6 +34,9 @@ jobs:
     timeout-minutes: 55
     env:
       GH_TOKEN: ${{ secrets.SYNC_PAT }}
+      # The sync steps repoint origin at upstream, so gh would otherwise
+      # resolve deploy-fork.yml against tianma-if/edgeever and 404.
+      GH_REPO: ${{ github.repository }}
       UPSTREAM_REPOSITORY: tianma-if/edgeever
       UPDATE_CHANNEL: ${{ inputs.channel || vars.EDGE_EVER_UPDATE_CHANNEL || 'stable' }}
       # A manual run is an explicit request to publish the selected version.
@@ -310,7 +313,7 @@ jobs:
           # than relying on its on:push trigger. A dispatch failure is fatal
           # on purpose: exiting 0 here is what let the live site drift 47
           # versions behind while every sync run stayed green.
-          gh workflow run deploy-fork.yml --ref main
+          gh workflow run deploy-fork.yml --ref main -R "${GITHUB_REPOSITORY}"
           echo "Dispatched deploy-fork.yml on main."
           echo "method=workflow_dispatch" >> "${GITHUB_OUTPUT}"
           echo "" >> "${GITHUB_STEP_SUMMARY}"
@@ -325,7 +328,7 @@ jobs:
           final_commit="$(git rev-parse HEAD)"
           deadline=$(( $(date +%s) + 1800 ))
           while [ "$(date +%s)" -lt "$deadline" ]; do
-            run_json=$(gh run list --workflow deploy-fork.yml --commit "$final_commit" \
+            run_json=$(gh run list -R "${GITHUB_REPOSITORY}" --workflow deploy-fork.yml --commit "$final_commit" \
               --limit 1 --json databaseId,status,conclusion)
             run_id=$(printf '%s' "$run_json" | jq -r '.[0].databaseId // empty')
             status=$(printf '%s' "$run_json" | jq -r '.[0].status // "pending"')
@@ -450,6 +453,15 @@ jobs:
         run: |
           set -euo pipefail
           title="EdgeEver automatic update requires attention"
+          # This Fork has GitHub Issues disabled; creating one silently fails.
+          # Fall back to the run summary so a real failure is still visible.
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}" --jq ".has_issues" 2>/dev/null || echo false)" != "true" ]; then
+            echo "::error::Sync/deploy failed. GitHub Issues are disabled on this Fork; details are in the job summary."
+            echo "" >> "${GITHUB_STEP_SUMMARY}"
+            echo "### ${title}" >> "${GITHUB_STEP_SUMMARY}"
+            echo "Update or deployment from ${UPSTREAM_REPOSITORY} (${TARGET_REF}) failed. Live site was left unchanged." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
           existing="$(gh issue list --state open --search "${title} in:title" --json number --jq '.[0].number // empty')"
           if [ -z "${existing}" ]; then
             gh issue create \
