@@ -45,6 +45,32 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Repair stale patch context (expo-sharing)
+        run: |
+          set -euo pipefail
+          f='patches/expo-sharing@57.0.22.patch'
+          if grep -q '^@@ -46,10 +46,27 @@' "$f"; then
+            echo "patch already repaired"
+            exit 0
+          fi
+          # expo-sharing@57.0.22 ships a blank line before the patched return
+          # statement; the upstream patch context predates it, so bun's
+          # --frozen-lockfile apply fails with "hunk #1 does not apply".
+          python3 - "$f" <<'EOS'
+          import sys
+          path = sys.argv[1]
+          src = open(path, encoding='utf-8').read()
+          old_hdr = '@@ -47,9 +47,26 @@'
+          rem = '-  return intent.type != null && allowedShareActions.contains(intent.action)'
+          if old_hdr not in src or rem not in src:
+              sys.exit('unexpected patch layout; refusing to rewrite')
+          src = src.replace(old_hdr, '@@ -46,10 +46,27 @@', 1)
+          src = src.replace(rem, ' \n' + rem, 1)
+          open(path, 'w', encoding='utf-8').write(src)
+          EOS
+          grep -q '^@@ -46,10 +46,27 @@' "$f"
+          echo "repaired $f"
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
